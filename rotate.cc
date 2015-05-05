@@ -1,0 +1,197 @@
+// Howto compile: g++ -o rotate rotate.cc
+// Usage example: nohup uglyapp | rotate -o ugly.out -t 1 &
+// Author       : peihanw@gmail.com
+
+#include <sys/time.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <errno.h>
+#include <string>
+
+#define VERSION_IDENT "@(#)compiled [rotate] at: ["__DATE__"], ["__TIME__"]"
+static const char* version_ident = VERSION_IDENT;
+
+static std::string _OutFileNm;
+static int _SizeLimit = 100;
+static int _SizeLimitBytes = 100 * 1048576;
+static int _TimestampFlag = 0;
+static int _AppendFlag = 1;
+static FILE* _Fp = NULL;
+
+#define BUFSZ 4096
+
+void _parseArgs(int argc, char* const* argv);
+void _usage(const char* exename);
+void _now(std::string& now_str, bool with_precision);
+FILE* _openOut();
+void _flushFp(std::string line);
+void _mainLoop();
+
+int main(int argc, char* const* argv) {
+	_parseArgs(argc, argv);
+	_Fp = _openOut();
+	_mainLoop();
+}
+
+void _mainLoop() {
+	char* buf_ = new char[BUFSZ];
+	std::string line_;
+
+	while (true) {
+		ssize_t r = read(fileno(stdin), buf_, BUFSZ);
+
+		if (r == 0) {
+			exit(0);
+		} else if (r < 0) {
+			fprintf(stderr, "@@ %s,%d-->Error: read stdin errno=%d\n", __FILE__, __LINE__, errno);
+			exit(1);
+		} else {
+			for (int i = 0; i < r; ++i) {
+				if (_TimestampFlag && line_.empty()) {
+					_now(line_, true);
+					line_.push_back(' ');
+				}
+
+				line_.push_back(buf_[i]);
+
+				if (buf_[i] == '\n') {
+					_flushFp(line_);
+					line_ = "";
+				}
+			}
+		}
+	}
+}
+
+void _flushFp(std::string line) {
+	fprintf(_Fp, "%s", line.data());
+	fflush(_Fp);
+
+	if (fileno(_Fp) == 1) {
+		return;
+	}
+
+	long pos_ = ftell(_Fp);
+
+	if (pos_ < _SizeLimitBytes) {
+		return;
+	}
+
+	fprintf(_Fp, "*** file size %ld reach rotate limit ***\n", pos_);
+	fclose(_Fp);
+	std::string now_str_;
+	_now(now_str_, false);
+	std::string bak_nm_(_OutFileNm);
+	bak_nm_.append(".");
+	bak_nm_.append(now_str_);
+
+	if (rename(_OutFileNm.data(), bak_nm_.data()) != 0) {
+		fprintf(stderr, "@@ %s,%d-->Error: rename(%s,%s), errno=%d\n",
+			__FILE__, __LINE__, _OutFileNm.data(), bak_nm_.data(), errno);
+		_Fp = stdout;
+	} else {
+		_Fp = _openOut();
+	}
+}
+
+FILE* _openOut() {
+	FILE* fp_ = NULL;
+
+	if (_AppendFlag) {
+		fp_ = fopen(_OutFileNm.data(), "a+");
+	} else {
+		fp_ = fopen(_OutFileNm.data(), "w");
+	}
+
+	if (fp_ == NULL) {
+		fprintf(stderr, "@@ %s,%d-->Fatal: open [%s], errno=%d, use stdout instead\n",
+			__FILE__, __LINE__, _OutFileNm.data(), errno);
+		return stdout;
+	}
+
+	return fp_;
+}
+
+void _now(std::string& now_str, bool with_precision) {
+	char buf_[64];
+	struct timeval tv_;
+	::gettimeofday(&tv_, NULL);
+	struct tm tm_;
+	::localtime_r(&tv_.tv_sec, &tm_);
+	strftime(buf_, sizeof (buf_), "%Y%m%d%H%M%S", &tm_);
+	now_str = buf_;
+
+	if (!with_precision) {
+		return;
+	}
+
+	unsigned msec_ = tv_.tv_usec % 1000000;
+	sprintf(buf_, ".%06d", msec_);
+	now_str.append(buf_);
+}
+
+void _parseArgs(int argc, char* const* argv) {
+	int err_ = 0;
+	char c;
+
+	while ((c = getopt(argc, argv, ":o:s:t:a:")) != char(EOF)) {
+		switch (c) {
+		case ':':
+			++err_;
+			fprintf(stderr, "Fatal: option -%c needs an argument\n", optopt);
+			break;
+
+		case '?':
+			++err_;
+			fprintf(stderr, "Fatal: unrecognized option -%c\n", optopt);
+			break;
+
+		case 'o':
+			_OutFileNm = optarg;
+			break;
+
+		case 's':
+			_SizeLimit = atoi(optarg);
+			break;
+
+		case 't':
+			_TimestampFlag = atoi(optarg);
+			break;
+
+		case 'a':
+			_AppendFlag = atoi(optarg);
+			break;
+
+		default:
+			break;
+		}
+	}
+
+	if (_OutFileNm.empty()) {
+		++err_;
+		fprintf(stderr, "Fatal: outFileNm not specified\n");
+	}
+
+	if (_SizeLimit <= 9) {
+		++err_;
+		fprintf(stderr, "Fatal: sizeLimit [%d] should gt 9\n", _SizeLimit);
+	}
+
+	if (err_) {
+		_usage(argv[0]);
+	}
+
+	_SizeLimitBytes = _SizeLimit * 1048576;
+}
+
+void _usage(const char* exename) {
+	fprintf(stderr, "usage: %s -o outFileNm [-s sizeLimit(MB)] [-t 0|1] [-a 1|0]\n", exename);
+	fprintf(stderr, "       -o : output file name\n");
+	fprintf(stderr, "       -s : size of file toggle trigger, in MB, default '100'\n");
+	fprintf(stderr, "       -t : timestame flag, 0:without timestamp, 1:prepend timestamp, default '0'\n");
+	fprintf(stderr, "       -a : append mode, 1:append, 0:trunk, default '1'\n");
+	fprintf(stderr, "eg.    %s -o app.out -s 100 -t 1 -a 1\n", exename);
+	exit(1);
+}
+

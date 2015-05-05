@@ -1,0 +1,19 @@
+## .astylerc
+--style=java
+--indent=force-tab=8
+--indent-preprocessor
+--indent-namespaces
+--indent-cases
+--indent-col1-comments
+--min-conditional-indent=1
+--break-blocks
+--pad-oper
+--pad-header
+--align-pointer=type
+--align-reference=type
+--add-brackets
+--max-code-length=132
+--mode=c
+--delete-empty-lines
+--lineend=linux
+--max-instatement-indent=80
