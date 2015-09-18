@@ -1,4 +1,4 @@
-## .astylerc
+## ~/.astylerc
 --style=java
 --indent=force-tab=8
 --indent-preprocessor
