@@ -17,15 +17,17 @@ static int _SizeLimit = 100;
 static int _SizeLimitBytes = 100 * 1048576;
 static int _TimestampFlag = 0;
 static int _AppendFlag = 1;
+static bool _LongWait = true;
 static FILE* _Fp = NULL;
 
-#define BUFSZ 4096
+#define BUFSZ 8192
 
 void _parseArgs(int argc, char* const* argv);
 void _usage(const char* exename);
 void _now(std::string& now_str, bool with_precision);
 FILE* _openOut();
-void _flushFp(std::string line);
+int _selectStdin(bool long_wait);
+void _printFp(const std::string& line);
 void _mainLoop();
 
 int main(int argc, char* const* argv) {
@@ -35,38 +37,54 @@ int main(int argc, char* const* argv) {
 }
 
 void _mainLoop() {
+	int event_;
 	char* buf_ = new char[BUFSZ];
 	std::string line_;
 
 	while (true) {
-		ssize_t r = read(fileno(stdin), buf_, BUFSZ);
+		event_ = _selectStdin(_LongWait);
 
-		if (r == 0) {
-			exit(0);
-		} else if (r < 0) {
-			fprintf(stderr, "@@ %s,%d-->Error: read stdin errno=%d\n", __FILE__, __LINE__, errno);
+		if (event_ == 0) {
+			if (!_LongWait) {
+				_LongWait = true;
+				fflush(_Fp);
+			}
+
+			continue;
+		} else if (event_ < 0) {
+			fprintf(stderr, "@@ %s,%d-->Error: select stdin, errno=%d\n", __FILE__, __LINE__, errno);
 			exit(1);
 		} else {
-			for (int i = 0; i < r; ++i) {
-				if (_TimestampFlag && line_.empty()) {
-					_now(line_, true);
-					line_.push_back(' ');
-				}
+			ssize_t r = read(fileno(stdin), buf_, BUFSZ);
 
-				line_.push_back(buf_[i]);
+			if (r == 0) { // EOF
+				exit(0);
+			} else if (r < 0) {
+				fprintf(stderr, "@@ %s,%d-->Error: read stdin errno=%d\n", __FILE__, __LINE__, errno);
+				exit(1);
+			} else {
+				_LongWait = false;
 
-				if (buf_[i] == '\n') {
-					_flushFp(line_);
-					line_ = "";
+				for (int i = 0; i < r; ++i) {
+					if (_TimestampFlag && line_.empty()) {
+						_now(line_, true);
+						line_.push_back(' ');
+					}
+
+					line_.push_back(buf_[i]);
+
+					if (buf_[i] == '\n') {
+						_printFp(line_);
+						line_ = "";
+					}
 				}
 			}
 		}
 	}
 }
 
-void _flushFp(std::string line) {
+void _printFp(const std::string& line) {
 	fprintf(_Fp, "%s", line.data());
-	fflush(_Fp);
 
 	if (fileno(_Fp) == 1) {
 		return;
@@ -92,6 +110,33 @@ void _flushFp(std::string line) {
 		_Fp = stdout;
 	} else {
 		_Fp = _openOut();
+	}
+}
+
+int _selectStdin(bool long_wait) {
+	int r;
+	int nfds_ = fileno(stdin) + 1;
+	fd_set readfds_;
+	struct timeval timeout_;
+
+	while (true) {
+		if (long_wait) {
+			timeout_.tv_sec = 10;
+			timeout_.tv_usec = 0;
+		} else {
+			timeout_.tv_sec = 0;
+			timeout_.tv_usec = 50000;
+		}
+
+		FD_ZERO(&readfds_);
+		FD_SET(fileno(stdin), &readfds_);
+		r = select(nfds_, &readfds_, NULL, NULL, &timeout_);
+
+		if (r < 0 && errno == EINTR) {
+			continue;
+		}
+
+		return r;
 	}
 }
 
