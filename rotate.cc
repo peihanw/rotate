@@ -1,4 +1,5 @@
-// Howto compile: g++ -o rotate rotate.cc
+// Howto compile: g++ -O2 -o rotate rotate.cc
+// (please use compiler optimzation to reduce CPU consumption in production env)
 // Usage example: nohup uglyapp | rotate -o ugly.out -t 1 &
 // Author       : peihanw@gmail.com
 
@@ -20,14 +21,15 @@ static int _AppendFlag = 1;
 static bool _LongWait = true;
 static FILE* _Fp = NULL;
 
-#define BUFSZ 8192
+#define BUFSZ 32768
 
 void _parseArgs(int argc, char* const* argv);
-void _usage(const char* exename);
+void _usage(const char* exename, int exit_code);
 void _now(std::string& now_str, bool with_precision);
 FILE* _openOut();
 int _selectStdin(bool long_wait);
 void _printFp(const std::string& line);
+void _consumeStdin(char* buf, std::string& line);
 void _mainLoop();
 
 int main(int argc, char* const* argv) {
@@ -55,29 +57,33 @@ void _mainLoop() {
 			fprintf(stderr, "@@ %s,%d-->Error: select stdin, errno=%d\n", __FILE__, __LINE__, errno);
 			exit(1);
 		} else {
-			ssize_t r = read(fileno(stdin), buf_, BUFSZ);
+			_consumeStdin(buf_, line_);
+		}
+	}
+}
 
-			if (r == 0) { // EOF
-				exit(0);
-			} else if (r < 0) {
-				fprintf(stderr, "@@ %s,%d-->Error: read stdin errno=%d\n", __FILE__, __LINE__, errno);
-				exit(1);
-			} else {
-				_LongWait = false;
+void _consumeStdin(char* buf, std::string& line) {
+	ssize_t r = read(fileno(stdin), buf, BUFSZ);
 
-				for (int i = 0; i < r; ++i) {
-					if (_TimestampFlag && line_.empty()) {
-						_now(line_, true);
-						line_.push_back(' ');
-					}
+	if (r == 0) { // EOF
+		exit(0);
+	} else if (r < 0) {
+		fprintf(stderr, "@@ %s,%d-->Error: read stdin errno=%d\n", __FILE__, __LINE__, errno);
+		exit(1);
+	} else {
+		_LongWait = false;
 
-					line_.push_back(buf_[i]);
+		for (int i = 0; i < r; ++i) {
+			if (_TimestampFlag && line.empty()) {
+				_now(line, true);
+				line.push_back(' ');
+			}
 
-					if (buf_[i] == '\n') {
-						_printFp(line_);
-						line_ = "";
-					}
-				}
+			line.push_back(buf[i]);
+
+			if (buf[i] == '\n') {
+				_printFp(line);
+				line = "";
 			}
 		}
 	}
@@ -224,19 +230,22 @@ void _parseArgs(int argc, char* const* argv) {
 	}
 
 	if (err_) {
-		_usage(argv[0]);
+		_usage(argv[0], 1);
 	}
 
 	_SizeLimitBytes = _SizeLimit * 1048576;
 }
 
-void _usage(const char* exename) {
+void _usage(const char* exename, int exit_code) {
 	fprintf(stderr, "usage: %s -o outFileNm [-s sizeLimit(MB)] [-t 0|1] [-a 1|0]\n", exename);
 	fprintf(stderr, "       -o : output file name\n");
 	fprintf(stderr, "       -s : size of file toggle trigger, in MB, default '100'\n");
 	fprintf(stderr, "       -t : timestame flag, 0:without timestamp, 1:prepend timestamp, default '0'\n");
 	fprintf(stderr, "       -a : append mode, 1:append, 0:trunk, default '1'\n");
-	fprintf(stderr, "eg.    %s -o app.out -s 100 -t 1 -a 1\n", exename);
-	exit(1);
+	fprintf(stderr, "eg.    %s -o app.out -s 200 -t 1\n", exename);
+
+	if (exit_code >= 0) {
+		exit(exit_code);
+	}
 }
 
