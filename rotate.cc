@@ -1,6 +1,6 @@
 // Howto compile: g++ -O2 -o rotate rotate.cc
 // (please use compiler optimzation to reduce CPU consumption in production env)
-// Usage example: nohup uglyapp | rotate -o ugly.out -t 1 &
+// Usage example: nohup uglyapp | rotate -o ugly.out &
 // Author       : peihanw@gmail.com
 
 #include <sys/time.h>
@@ -16,7 +16,7 @@ static const char* version_ident = VERSION_IDENT;
 static std::string _OutFileNm;
 static int _SizeLimit = 100;
 static int _SizeLimitBytes = 100 * 1048576;
-static int _TimestampFlag = 0;
+static int _TimestampFlag = 1;
 static int _AppendFlag = 1;
 static bool _LongWait = true;
 static FILE* _Fp = NULL;
@@ -237,10 +237,10 @@ void _parseArgs(int argc, char* const* argv) {
 }
 
 void _usage(const char* exename, int exit_code) {
-	fprintf(stderr, "usage: %s -o outFileNm [-s sizeLimit(MB)] [-t 0|1] [-a 1|0]\n", exename);
+	fprintf(stderr, "usage: %s -o outFileNm [-s sizeLimit(MB)] [-t 1|0] [-a 1|0]\n", exename);
 	fprintf(stderr, "       -o : output file name\n");
 	fprintf(stderr, "       -s : size of file toggle trigger, in MB, default '100'\n");
-	fprintf(stderr, "       -t : timestame flag, 0:without timestamp, 1:prepend timestamp, default '0'\n");
+	fprintf(stderr, "       -t : timestame flag, 1:prepend timestamp, 0:without timestamp, default '1'\n");
 	fprintf(stderr, "       -a : append mode, 1:append, 0:trunk, default '1'\n");
 	fprintf(stderr, "eg.    %s -o app.out -s 200 -t 1\n", exename);
 
