@@ -232,10 +232,10 @@ void _parseArgs(int argc, char* const* argv) {
 	char c;
 #ifdef __linux__
 
-	while ((c = getopt(argc, argv, ":o:s:t:a:p:")) != char(EOF)) {
+	while ((c = getopt(argc, argv, ":o:s:t:a:g:p:")) != char(EOF)) {
 #else
 
-	while ((c = getopt(argc, argv, ":o:s:t:a:")) != char(EOF)) {
+	while ((c = getopt(argc, argv, ":o:s:t:a:g:")) != char(EOF)) {
 #endif
 
 		switch (c) {
@@ -263,6 +263,10 @@ void _parseArgs(int argc, char* const* argv) {
 
 		case 'a':
 			_AppendFlag = atoi(optarg);
+			break;
+
+		case 'g':
+			// do nothing
 			break;
 #ifdef __linux__
 
@@ -295,9 +299,9 @@ void _parseArgs(int argc, char* const* argv) {
 
 void _usage(const char* exename, int exit_code) {
 #ifdef __linux__
-	fprintf(stderr, "usage: %s -o outFileNm [-s sizeLimit(MB)] [-t 1|0] [-p 1|0] [-a 1|0]\n", exename);
+	fprintf(stderr, "usage: %s -o outFileNm [-s sizeLimit(MB)] [-t 1|0] [-p 1|0] [-a 1|0] [-g grep_str]\n", exename);
 #else
-	fprintf(stderr, "usage: %s -o outFileNm [-s sizeLimit(MB)] [-t 1|0] [-a 1|0]\n", exename);
+	fprintf(stderr, "usage: %s -o outFileNm [-s sizeLimit(MB)] [-t 1|0] [-a 1|0] [-g grep_str]\n", exename);
 #endif
 	fprintf(stderr, "       -o : output file name\n");
 	fprintf(stderr, "       -s : size of file toggle trigger, in MB, default '100'\n");
@@ -306,6 +310,7 @@ void _usage(const char* exename, int exit_code) {
 	fprintf(stderr, "       -p : pid flag, 1:prepend pid, 0:no pid, default '1' (pid may incorrect when app forked afterwards)\n");
 #endif
 	fprintf(stderr, "       -a : append mode, 1:append, 0:trunk, default '1'\n");
+	fprintf(stderr, "       -g : an optional uniq string for this process to be identified by ps & grep\n");
 	fprintf(stderr, "eg.    %s -o app.out -s 200\n", exename);
 
 	if (exit_code >= 0) {

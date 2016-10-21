@@ -11,12 +11,13 @@
 ````
 ## command line usage
 $ ./rotate
-usage: ./rotate -o outFileNm [-s sizeLimit(MB)] [-t 1|0] [-p 1|0] [-a 1|0]
+usage: ./rotate -o outFileNm [-s sizeLimit(MB)] [-t 1|0] [-p 1|0] [-a 1|0] [-g grep_str]
        -o : output file name
        -s : size of file toggle trigger, in MB, default '100'
        -t : timestame flag, 1:prepend timestame, 0:without timestamp, default '1'
        -p : pid flag, 1:prepend pid, 0:no pid, default '1' (pid may incorrect when app forked afterwards)
        -a : append mode, 1:append, 0:trunk, default '1'
+       -g : an optional uniq string for this process to be identified by ps & grep
 eg.    ./rotate -o app.out -s 200
 
 ## an example
