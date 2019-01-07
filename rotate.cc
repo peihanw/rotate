@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <errno.h>
+#include <signal.h>
 #ifdef __linux__
 #include <string.h>
 #include <dirent.h>
@@ -25,6 +26,14 @@ static int _TimestampFlag = 1;
 static int _AppendFlag = 1;
 static bool _LongWait = true;
 static FILE* _Fp = NULL;
+static int _GzipLevel = 0;
+static std::string* _GzipPath = NULL;
+static const char* _GzipPathSearchList[] = {
+	"/bin/gzip",
+	"/usr/bin/gzip",
+	"/usr/local/bin/gzip",
+	"/usr/contrib/bin/gzip"
+};
 #ifdef __linux__
 static bool _PipePidFlag = true;
 static pid_t _MyPid = 0;
@@ -41,6 +50,8 @@ FILE* _openOut();
 int _selectStdin(bool long_wait);
 void _printFp(const std::string& line);
 void _consumeStdin(char* buf, std::string& line);
+void _gzip(const char* file_path);
+void _findGzipPath();
 void _mainLoop();
 #ifdef __linux__
 void _firstLoop(char* buf, std::string& line);
@@ -160,6 +171,7 @@ void _printFp(const std::string& line) {
 			__FILE__, __LINE__, _OutFileNm.data(), bak_nm_.data(), errno);
 		_Fp = stdout;
 	} else {
+		_gzip(bak_nm_.data());
 		_Fp = _openOut();
 	}
 }
@@ -232,10 +244,10 @@ void _parseArgs(int argc, char* const* argv) {
 	char c;
 #ifdef __linux__
 
-	while ((c = getopt(argc, argv, ":o:s:t:a:g:p:")) != char(EOF)) {
+	while ((c = getopt(argc, argv, ":o:s:t:a:g:z:p:")) != char(EOF)) {
 #else
 
-	while ((c = getopt(argc, argv, ":o:s:t:a:g:")) != char(EOF)) {
+	while ((c = getopt(argc, argv, ":o:s:t:a:z:g:")) != char(EOF)) {
 #endif
 
 		switch (c) {
@@ -265,6 +277,9 @@ void _parseArgs(int argc, char* const* argv) {
 			_AppendFlag = atoi(optarg);
 			break;
 
+		case 'z':
+			_GzipLevel = atoi(optarg);
+
 		case 'g':
 			// do nothing
 			break;
@@ -290,6 +305,11 @@ void _parseArgs(int argc, char* const* argv) {
 		fprintf(stderr, "%s,%d-->ERO: sizeLimit [%d] should gt 9\n", __FILE__, __LINE__, _SizeLimit);
 	}
 
+	if (_GzipLevel < 0 || _GzipLevel > 9) {
+		++err_;
+		fprintf(stderr, "%s,%d-->ERO: gzipLevel [%d] should within 0..9\n", __FILE__, __LINE__, _GzipLevel);
+	}
+
 	if (err_) {
 		_usage(argv[0], 1);
 	}
@@ -299,7 +319,7 @@ void _parseArgs(int argc, char* const* argv) {
 
 void _usage(const char* exename, int exit_code) {
 #ifdef __linux__
-	fprintf(stderr, "usage: %s -o outFileNm [-s sizeLimit(MB)] [-t 1|0] [-p 1|0] [-a 1|0] [-g grep_str]\n", exename);
+	fprintf(stderr, "usage: %s -o outFileNm [-s sizeLimit(MB)] [-t 1|0] [-p 1|0] [-a 1|0] [-z 0-9] [-g grep_str]\n", exename);
 #else
 	fprintf(stderr, "usage: %s -o outFileNm [-s sizeLimit(MB)] [-t 1|0] [-a 1|0] [-g grep_str]\n", exename);
 #endif
@@ -310,11 +330,87 @@ void _usage(const char* exename, int exit_code) {
 	fprintf(stderr, "       -p : pid flag, 1:prepend pid, 0:no pid, default '1' (pid may incorrect when app forked afterwards)\n");
 #endif
 	fprintf(stderr, "       -a : append mode, 1:append, 0:trunk, default '1'\n");
+	fprintf(stderr, "       -z : gzip compression level, default '0'\n");
 	fprintf(stderr, "       -g : an optional uniq string for this process to be identified by ps & grep\n");
 	fprintf(stderr, "eg.    %s -o app.out -s 200\n", exename);
 
 	if (exit_code >= 0) {
 		exit(exit_code);
+	}
+}
+
+void _gzip(const char* file_path) {
+	if (_GzipLevel <= 0) {
+		return;
+	} else if (_GzipLevel > 9) {
+		_GzipLevel = 9;
+	}
+
+	_findGzipPath();
+
+	if (_GzipPath->empty()) {
+		return;
+	}
+
+	signal(SIGCHLD, SIG_IGN);
+	pid_t pid_ = fork(); // fork twice & nohup gzip
+
+	if (pid_ < 0) {
+		fprintf(stderr, "%s,%d-->ERO: fatal gzip 1st fork errno=%d\n", __FILE__, __LINE__, errno);
+		return;
+	} else if (pid_ > 0) {
+		return;
+	}
+
+	for (int fd_ = 3; fd_ <= 1024; ++fd_) {
+		close(fd_);
+	}
+
+	int r = setsid();
+
+	if (r == -1) {
+		fprintf(stderr, "%s,%d-->ERO: fatal gzip setsid errno=%d\n", __FILE__, __LINE__, errno);
+		_exit(1);
+	}
+
+	pid_ = fork();
+
+	if (pid_ < 0) {
+		fprintf(stderr, "%s,%d-->ERO: fatal gzip 2nd fork errno=%d\n", __FILE__, __LINE__, errno);
+		_exit(1);
+	} else if (pid_ > 0) {
+		_exit(0); // to skip atexit hook avoid 'exit(0)'
+	}
+
+	signal(SIGCHLD, SIG_IGN);
+	signal(SIGHUP, SIG_IGN);
+	signal(SIGPIPE, SIG_IGN);
+	char buf_[32];
+	sprintf(buf_, "-%d", _GzipLevel);
+	execl(_GzipPath->data(), "gzip", buf_, "-f", file_path, NULL);
+}
+
+void _findGzipPath() {
+	if (_GzipPath != NULL) {
+		return;
+	}
+
+	struct stat stat_;
+
+	for (unsigned int i = 0; i < sizeof(_GzipPathSearchList) / sizeof(const char*); ++ i) {
+		if (stat(_GzipPathSearchList[i], &stat_) != 0) {
+			continue;
+		}
+
+		if (stat_.st_mode & S_IXUSR) {
+			_GzipPath = new std::string(_GzipPathSearchList[i]);
+			break;
+		}
+	}
+
+	if (_GzipPath == NULL) {
+		fprintf(stderr, "%s,%d-->WRN: gzip not found, can not compress toggled files\n", __FILE__, __LINE__);
+		_GzipPath = new std::string();
 	}
 }
 
